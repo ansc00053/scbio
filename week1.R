@@ -59,7 +59,7 @@ ArrowFiles # check to see if data loaded properly
 # 1.3) Identify Doublets
 
 # Add doublet scores to the project
-doubScores <- addDoubletScores(
+doubScores <- addDoubletScores( # adds to each arrow file
   input = ArrowFiles,
   k = 10,            # Number of nearest neighbors to consider for pseudo-doublets
   knnMethod = "UMAP", # Embedding method for nearest neighbor search
@@ -114,7 +114,7 @@ cat("Median number of fragments:", median_frags, "\n")
 num_peaks <- nrow(proj_filtered@peakSet)
 cat("Number of peaks in the dataset:", num_peaks, "\n")
 
-# 1.4) Number of cells per sample
+# 1.5) Number of cells per sample
 cells_per_sample <- table(proj_filtered@cellColData$Sample)
 cat("Number of cells per sample:\n")
 print(cells_per_sample)
