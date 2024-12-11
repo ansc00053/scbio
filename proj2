@@ -1,0 +1,694 @@
+# PROJECT 2 ###
+
+# Yagmur Akarsu 
+# Lizzie Schmitz
+
+# 1.1 Setting up the environment #
+
+getRversion()
+
+set.seed(42) # set seed
+
+install.packages("devtools") # installed
+install.packages("remotes") # installed
+install.packages('BiocManager') # installed
+BiocManager::install(c("motifmatchr", "TFBSTools", "DirichletMultinomial"))
+devtools::install_github("GreenleafLab/chromVARmotifs") # installed
+BiocManager::install("rhdf5") # installed
+BiocManager::install("chromVAR") # installed
+BiocManager::install("ComplexHeatmap") #installed
+BiocManager::install("Rsamtools") # didn't work (version compatibility issues)
+remotes::install_github("GreenleafLab/ArchR") # INSTALLEDDDD
+install.packages("Cairo") # installed
+install.packages("tidyverse") # installed
+install.packages("ggplot2") # installed
+install.packages("gridExtra") # installed
+install.packages("patchwork") # installed
+install.packages("pheatmap") # installed
+install.packages("dplyr") # installed
+install.packages("hexbin") # installed
+install.packages("Seurat") # installed
+devtools::install_github("immunogenomics/harmony") # installed
+devtools::install_github("immunogenomics/presto") #installed
+
+
+library(gridExtra) # yes
+library(ggplot2) #yes
+library(Cairo) # yes
+library(ArchR) # yes
+library(patchwork) # yes
+library(pheatmap) # installed
+library(dplyr) # yes
+library(hexbin) #yes
+library(harmony) #yes
+library(Seurat) # yes
+library(presto) # yes
+
+addArchRThreads(threads = 1) # number of threads should be 1/2 or 3/4 of the total available cores, 16 is default, 1 for window OS
+
+addArchRGenome("hg38")
+
+#1.2 
+
+# Defining our directory to get our data.İ
+setwd("/mnt/c/Users/ArchR")
+list.files("./scbi_p2/")
+
+# Paths to your fragment files
+frag_files <- c(
+  "./scbi_p2/hft_ctx_w21_dc1r3_r1_atac_fragments.tsv.gz",
+  "./scbi_p2/hft_ctx_w21_dc2r2_r1_atac_fragments.tsv.gz",
+  "./scbi_p2/hft_ctx_w21_dc2r2_r2_atac_fragments.tsv.gz"
+)
+
+# create arrow files for the three samples
+
+ArrowFiles <- createArrowFiles(
+  inputFiles = frag_files,               # Use fragment file paths
+  sampleNames = c("hft_ctx_w21_dc1r3_r1_atac_fragments", "hft_ctx_w21_dc2r2_r1_atac_fragments", "hft_ctx_w21_dc2r2_r2_atac_fragments"),       # Use the names of the files
+  minTSS = 4,                            
+  minFrags = 500,                        
+  addGeneScoreMat = TRUE,                
+  addTileMat = TRUE,                     # Add tiling matrix
+  TileMatParams = list(tileSize = 1000), # Set tile size to 1000 at first
+  verbose = TRUE
+)
+
+ArrowFiles # check to see if data loaded properly; your three files should be visible
+
+
+# 1.3) Identify Doublets
+# Add doublet scores to the project
+doubScores <- addDoubletScores( # adds to each arrow file
+  input = ArrowFiles,
+  k = 10,            # Number of nearest neighbors to consider for pseudo-doublets
+  knnMethod = "UMAP", # Embedding method for nearest neighbor search
+  LSIMethod = 1      # Method for inferring doublets (set to 1 as default)
+)
+
+# 1.4) Create ArchR project
+proj <- ArchRProject(ArrowFiles = ArrowFiles, outputDirectory = "ArchR_Project")
+
+# 1.4) Inspect the project and cell metadata
+proj
+
+colnames(proj@cellColData) # metadata names, frags = nFrags and TSS = ReadsInTSS
+
+# Filter out doublets based on the threshold
+proj_filtered <- filterDoublets(proj)
+
+# Check the filtered project
+proj_filtered
+
+
+colnames(proj_filtered@cellColData) # metadata names, frags = nFrags and TSS = ReadsInTSS
+
+# save the filtered project to a new file
+saveArchRProject(proj_filtered, "c:/Users/ArchR/proj_doubletfiltered")
+
+
+#### This is data after QC filtering and doublet removal ## 
+# 1.4)  Number of cells in the project
+num_cells <- sum(table(proj_filtered@cellColData$Sample))
+cat("Number of cells in the project: \n")
+print(num_cells)
+
+# 1.4) Median TSS value and median number of fragments
+median_tss <- median(proj_filtered@cellColData$ReadsInTSS)
+median_frags <- median(proj_filtered@cellColData$nFrags)
+cat("Median TSS value:", median_tss, "\n")
+cat("Median number of fragments:", median_frags, "\n")
+
+# 1.4) Dimensions of the peak set (number of peaks)
+num_peaks <- nrow(proj_filtered@peakSet)
+cat("Number of peaks in the dataset:", num_peaks, "\n") # CALL THIS AFTER YOU CALL PEAKS IN WEEK 2!!!!!!!!
+
+# 1.5) Number of cells per sample
+cells_per_sample <- table(proj_filtered@cellColData$Sample)
+cat("Number of cells per sample:\n")
+print(cells_per_sample)
+
+# 1.5) Plot the fragment length distribution of all samples in one plot
+
+pFL <- plotFragmentSizes(ArchRProj = proj_filtered)
+head(pFL)
+print(pFL)
+
+ggsave("QC-Sample-FragSizes.pdf", plot = pFL, width = 5, height = 5)
+
+# 1.5)´ Plot the distribution of TSS enrichment scores for each sample
+
+
+pTE <- plotTSSEnrichment(ArchRProj = proj_filtered)
+head(pTE)
+print(pTE)
+
+ggsave("QC-Sample-TSSEnrichment.pdf", plot = pTE, width = 5, height = 5)
+
+
+# 1.5) plotting log10(nFrags) v TSS enrichment scores, do this for EACH sample; samples 1-3 ordered by size
+# this code was written in triplicate for the sake of ease with my feeble 8GB RAM laptop--it does not handle loops well in R for big data - Lizzie
+
+sample1 <- ArchRProject(ArrowFiles = "hft_ctx_w21_dc2r2_r1_atac_fragments.arrow", outputDirectory = "sample1")
+sample2 <- ArchRProject(ArrowFiles = "hft_ctx_w21_dc1r3_r1_atac_fragments.arrow", outputDirectory = "sample2")
+sample3 <- ArchRProject(ArrowFiles = "hft_ctx_w21_dc2r2_r2_atac_fragments.arrow", outputDirectory = "sample3")
+
+nFragvTSS1 <- getCellColData(sample1, select = c("log10(nFrags)", "TSSEnrichment"))
+nFragvTSS2 <- getCellColData(sample2, select = c("log10(nFrags)", "TSSEnrichment"))
+nFragvTSS3 <- getCellColData(sample3, select = c("log10(nFrags)", "TSSEnrichment"))
+
+plot1 <- ggPoint(
+  x = nFragvTSS1[,1], 
+  y = nFragvTSS1[,2], 
+  colorDensity = TRUE,
+  continuousSet = "sambaNight",
+  xlabel = "Log10 Unique Fragments",
+  ylabel = "TSS Enrichment",
+  xlim = c(log10(500), quantile(nFragvTSS1[,1], probs = 0.99)),
+  ylim = c(0, quantile(nFragvTSS1[,2], probs = 0.99))
+) + geom_hline(yintercept = 4, lty = "dashed") + geom_vline(xintercept = 3, lty = "dashed")
+
+plot1
+
+plot2 <- ggPoint(
+  x = nFragvTSS2[,1], 
+  y = nFragvTSS2[,2], 
+  colorDensity = TRUE,
+  continuousSet = "sambaNight",
+  xlabel = "Log10 Unique Fragments",
+  ylabel = "TSS Enrichment",
+  xlim = c(log10(500), quantile(nFragvTSS2[,1], probs = 0.99)),
+  ylim = c(0, quantile(nFragvTSS2[,2], probs = 0.99))
+) + geom_hline(yintercept = 4, lty = "dashed") + geom_vline(xintercept = 3, lty = "dashed")
+
+plot2
+
+plot3 <- ggPoint(
+  x = nFragvTSS3[,1], 
+  y = nFragvTSS3[,2], 
+  colorDensity = TRUE,
+  continuousSet = "sambaNight",
+  xlabel = "Log10 Unique Fragments",
+  ylabel = "TSS Enrichment",
+  xlim = c(log10(500), quantile(nFragvTSS3[,1], probs = 0.99)),
+  ylim = c(0, quantile(nFragvTSS3[,2], probs = 0.99))
+) + geom_hline(yintercept = 4, lty = "dashed") + geom_vline(xintercept = 3, lty = "dashed")
+
+plot3
+
+ggsave("QC-Sample-TSSEnrichment1.pdf", plot = plot1, width = 5, height = 5)
+ggsave("QC-Sample-TSSEnrichment2.pdf", plot = plot2, width = 5, height = 5)
+ggsave("QC-Sample-TSSEnrichment3.pdf", plot = plot3, width = 5, height = 5)
+
+# 1.6) Now, for task 1.6, toy with the filtering settings to restrict the dots to the 'sunny side up' in the egg
+
+ArrowFiles2 <- createArrowFiles(
+  inputFiles = frag_files,               # Use fragment file paths
+  sampleNames = c("hft_ctx_w21_dc1r3_r1_atac_fragments2", "hft_ctx_w21_dc2r2_r1_atac_fragments2", "hft_ctx_w21_dc2r2_r2_atac_fragments2"),       # Use the names of the files
+  minTSS = 8,                            
+  minFrags = 1000,                        
+  addGeneScoreMat = TRUE,                
+  addTileMat = TRUE,                     # Add tiling matrix
+  TileMatParams = list(tileSize = 500), # Set tile size to 500 for stricter tiling resolution
+  verbose = TRUE
+)
+
+ArrowFiles2 # inspect the arrowfiles created
+
+# Add doublet scores to the project
+doubScores <- addDoubletScores( # adds to each arrow file
+  input = ArrowFiles2,
+  k = 10,            # Number of nearest neighbors to consider for pseudo-doublets
+  knnMethod = "UMAP", # Embedding method for nearest neighbor search
+  LSIMethod = 1      # Method for inferring doublets (set to 1 as default)
+)
+
+# 1.4) Create ArchR project
+proj2 <- ArchRProject(ArrowFiles = ArrowFiles2, outputDirectory = "ArchR_Project2")
+
+# 1.4) Inspect the project and cell metadata
+proj2
+
+colnames(proj2@cellColData) # metadata names, frags = nFrags and TSS = ReadsInTSS
+
+# Filter out doublets based on the threshold
+proj_filtered2 <- filterDoublets(proj2)
+
+# Check the filtered project
+proj_filtered2
+
+
+colnames(proj_filtered2@cellColData) # metadata names, frags = nFrags and TSS = ReadsInTSS
+
+# save the filtered project to a new file
+saveArchRProject(proj_filtered2, "c:/Users/ArchR/proj_doubletfiltered2")
+
+
+#### This is data after QC filtering and doublet removal ## 
+# 1.4)  Number of cells in the project
+num_cells <- sum(table(proj_filtered2@cellColData$Sample))
+cat("Number of cells in the project: \n")
+print(num_cells)
+
+# 1.4) Median TSS value and median number of fragments
+median_tss <- median(proj_filtered2@cellColData$ReadsInTSS)
+median_frags <- median(proj_filtered2@cellColData$nFrags)
+cat("Median TSS value:", median_tss, "\n")
+cat("Median number of fragments:", median_frags, "\n")
+
+# 1.4) Dimensions of the peak set (number of peaks)
+num_peaks <- nrow(proj_filtered2@peakSet)
+cat("Number of peaks in the dataset:", num_peaks, "\n") # CALL THIS AFTER YOU CALL PEAKS IN WEEK 2!!!!!!!
+
+# 2.1) Dimensionality Reduction using LSI
+
+proj_filtered <- loadArchRProject(path = "proj_filtered") # LOAD THIS ONE; NOT DOUBLETFILTER
+
+colnames(proj_filtered@cellColData)
+
+proj_filtered <- addIterativeLSI(
+  ArchRProj = proj_filtered,
+  useMatrix = "TileMatrix", 
+  name = "IterativeLSI", 
+  iterations = 2, # tweak if needed
+  clusterParams = list( #See Seurat::FindClusters
+    resolution = c(0.2), # tweak if needed, add more vector items 
+    sampleCells = 10000, 
+    n.start = 10
+  ), 
+  varFeatures = 25000, # tweak if needed
+  dimsToUse = 1:30 
+)
+
+# 2.2) UMAP with sample annotation and QC metrics
+
+proj_filtered <- addUMAP(
+  ArchRProj = proj_filtered, 
+  reducedDims = "IterativeLSI", # Use the reduced dimensions created earlier
+  name = "UMAP", 
+  nNeighbors = 30, # tweak if needed
+  minDist = 0.5,   # tweak if needed
+  metric = "cosine" 
+)
+
+# create a UMAP colored by sample
+UMAPsample <- plotEmbedding(
+  ArchRProj = proj_filtered, 
+  colorBy = "cellColData", 
+  name = "Sample", 
+  embedding = "UMAP"
+)
+
+UMAPsample
+
+ggsave("UMAPsamples3.pdf", plot = UMAPsample, width = 5, height = 5)
+
+# create a UMAP colored by TSS enrichment
+UMAPTSS <- plotEmbedding(
+  ArchRProj = proj_filtered, 
+  colorBy = "cellColData", 
+  name = "TSSEnrichment", 
+  embedding = "UMAP"
+)
+
+UMAPTSS
+
+ggsave("UMAPTSS2.pdf", plot = UMAPTSS, width = 5, height = 5)
+
+# create a UMAP colored by fragments
+UMAPfrag <- plotEmbedding(
+  ArchRProj = proj_filtered, 
+  colorBy = "cellColData", 
+  name = "log10(nFrags)", 
+  embedding = "UMAP"
+)
+
+ggsave("UMAPfrag2.pdf", plot = UMAPfrag, width = 5, height = 5)
+
+
+# 2.3) Batch correction, using Harmony, not used commonly in Seurat; Harmony assigns cells into soft clusters, favoring mixed dataset representation
+# then, it computes cluster centroids
+# then, you get database correction factors for each cluster and you moeve the cells based on the soft cluster memberships
+# you can also apply batch correction onto tissue of different samples (different donors, we want to correct batch effects between donors)
+
+
+proj_filtered <- addHarmony(
+  ArchRProj = proj_filtered,
+  reducedDims = "IterativeLSI",
+  name = "Harmony",
+  groupBy = "Sample"
+)
+
+getReducedDims(proj_filtered) # check and see if Harmony is on the list 
+
+proj_filtered <- addUMAP(
+  ArchRProj = proj_filtered,
+  reducedDims = "Harmony",
+  name = "UMAP_Harmony"
+)
+
+UMAPbatchc <- plotEmbedding(
+  ArchRProj = proj_filtered, 
+  colorBy = "cellColData", 
+  name = "Sample", 
+  embedding = "UMAP_Harmony"
+)
+
+ggsave("UMAPbatchcorrection2.pdf", plot = UMAPbatchc, width = 5, height = 5)
+
+# 3) Clustering using Louvain
+
+ ## proj_filtered <- addClusters( # IGNORE!!! This is an old cluster group we will NOT use
+ # input = proj_filtered,
+ # reducedDims = "IterativeLSI",
+ # method = "Seurat",
+ # name = "Clusters",
+ # resolution = 0.8
+# )
+
+# Create Louvain clusters with harmony-reduced dimensions
+proj_filtered <- addClusters(
+  input = proj_filtered, 
+  reducedDims = "Harmony", 
+  method = "Seurat", 
+  name = "LouvainClusters", 
+  resolution = 0.8,
+  force = TRUE
+)
+
+
+head(proj_filtered$LouvainClusters) # shows cluster ID for each cell
+
+table(proj_filtered$LouvainClusters)  # shows number of cells in each cluster
+
+# creates a table showing how samples are distributed across clusters
+cluster_sample_table <- table(proj_filtered$LouvainClusters, proj_filtered$Sample)
+
+# convert to proportions (calculate proportions of cells from each sample in each cluster)
+cluster_sample_proportions <- prop.table(cluster_sample_table, margin = 1)  # Row-wise proportions
+
+cM <- confusionMatrix(paste0(proj_filtered$LouvainClusters), paste0(proj_filtered$Sample)) # shows how each samples distribute into each cluster
+
+cM
+
+cM <- cM / Matrix::rowSums(cM) # plot the confusion matrix as a heatmap 
+
+p <- pheatmap::pheatmap(
+  mat = as.matrix(cM), 
+  color = paletteContinuous("whiteBlue"), 
+  border_color = "black",
+  cellwidth = 80,  # Increase this value for more horizontal spacing between tiles
+  cellheight = 10,  # Increase this value for more vertical spacing between tiles
+  fontsize = 10,  # Adjust font size for axis labels and main title
+  fontsize_row = 8,  # Font size for row labels (genes)
+  fontsize_col = 8   # Font size for column labels (samples)
+)
+
+p # final heatmap, shows which clusters contain what concentration of each sample
+
+ggsave("heatmaplouvain.pdf", plot = p, width = 8, height = 8)
+
+
+# create a UMAP colored by clusters
+UMAPcluster <- plotEmbedding(
+  ArchRProj = proj_filtered, 
+  colorBy = "cellColData", 
+  name = "LouvainClusters", 
+  embedding = "UMAP",
+  size = 0.6  
+)
+
+ggsave("louvainUMAP.pdf", plot = UMAPcluster, width = 8, height = 8)
+
+saveArchRProject(ArchRProj = proj_filtered, 
+                 outputDirectory = "proj_filtered", 
+                 load = FALSE,
+                 overwrite = TRUE
+)
+
+# 4) Peak assignment 
+
+# 4.1) prepare data for peak calling
+
+# add a group coverage file for clusters (needed for peak calling)
+proj_filtered <- addGroupCoverages(
+  ArchRProj = proj_filtered,
+  groupBy = "Clusters"
+)
+
+pathToMacs2 <- findMacs2()
+
+system("macs2 --version")
+
+proj_filtered <- addReproduciblePeakSet(
+  ArchRProj = proj_filtered,
+  groupBy = "Clusters",
+  pathToMacs2 = pathToMacs2
+)
+getPeakSet(proj_filtered) # retrieves peak set as a GRanges object; peak set contains an annotation for the group from which each peak originated
+
+saveArchRProject(ArchRProj = proj_filtered, 
+                 outputDirectory = "proj_peaks", 
+                 load = FALSE,
+                 overwrite = TRUE
+                 )
+proj_peaks <- loadArchRProject(path = "proj_peaks") # LOAD
+
+# Add the peak matrix to the project
+proj_peakMatrix <- addPeakMatrix(proj_filtered)
+
+# 4.2) Identifying cluster marker peaks
+
+table(proj_peakMatrix$Clusters) # shows our scRNA labels
+
+# find marker peaks
+marker_peaks <- getMarkerFeatures(
+  ArchRProj = proj_peakMatrix,
+  useMatrix = "PeakMatrix",
+  groupBy = "Clusters",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  testMethod = "wilcoxon"
+)
+
+marker_peaks # view marker peak summary here
+saveRDS(marker_peaks, file = "marker_peaks.rds") #save
+
+# identify marker genes; this returns a SummarizedExperiment object, a type of matrix 
+# we are grouping by cluster
+# bias parameters are normalized for all cells
+# each clutser corresponds to diferent cell types and this getMarkerFeatures funcitons identifies cell type-specific features (i.e. marker genes)
+# you can either look at gene scores or marker peaks 
+# CALL PEAKS BASED ON CLUSTER
+
+# returns list of dataframe objects; filters for fold change of 1.0 and a p-value of 0.01
+markerList <- getMarkers(marker_peaks, cutOff = "FDR <= 0.01 & Log2FC >= 1.0")
+
+# Heatmap of the marker genes
+
+heatmapMarkerGenes <- plotMarkerHeatmap(
+  seMarker = marker_peaks,
+  cutOff = "FDR <= 0.01 & Log2FC >= 1.0",
+  transpose = TRUE
+)
+
+heatmapMarkerGenes # type = complex heatmap
+
+png("heatmapMarkerGenes.png", width = 8, height = 8, units = "in", res = 300)
+draw(heatmapMarkerGenes) # ensure to use draw() to render the heatmap
+dev.off()
+
+# Now, plot the accessibility plots for specific genes
+# Create browser tracks around specific genes
+# your peak matrix will always be unique to your dataset, unlike a tile matrix
+# TileMatrix is not recommended for project settings, will not generate the same as MACS2, will amplify more bias
+# Use Macs2 instead
+# peaks are based on the row overlaps
+# when calling the peaks, we use 500 bp for our parameter (peak size) 
+# peak calling uses iterative overlap peak merging, which will create a final merged peak set; has more defined peaks than clustered overlap and raw overlap
+# macs2 uses the iterative method, which is most optimal 
+
+
+peakPlots <- plotBrowserTrack(
+  ArchRProj = proj_peakMatrix,
+  groupBy = "Clusters",
+  geneSymbol = c("TOP2A", "MKI67", "AURKA", "SATB2", "SLC12A7", "VGLUT1"), # separated SLC12A7/VGLUT1 because ARCh doesn't recognize the combined nomenclature
+  upstream = 50000,
+  downstream = 50000
+)
+
+# Plotting a specific gene: 
+
+grid::grid.newpage()
+grid::grid.draw(peakPlots$TOP2A)
+grid::grid.draw(peakPlots$MKI67)
+grid::grid.draw(peakPlots$AURKA)
+grid::grid.draw(peakPlots$SATB2)
+grid::grid.draw(peakPlots$SLC12A7)
+grid::grid.draw(peakPlots$VGLUT1)
+
+plotPDF(peakPlots, name = "Plot-Tracks-With-Features", width = 5, height = 5, ArchRProj = proj_peakMatrix, addDOC = FALSE)
+
+
+saveArchRProject(ArchRProj = proj_peakMatrix, 
+                 outputDirectory = "proj_peakMatrix", 
+                 load = FALSE,
+                 overwrite = TRUE
+)
+
+proj_peakMatrix <- loadArchRProject(path = "proj_peakMatrix") # LOAD
+
+# WEEK 3 (notes below)
+# obtaining differential peaks will generate a Log2 fold change accessibility MA plot; more differentiated cells show up on the top curve, while progenitors are on the bottom of the Log2 fold change graph
+# an MA plot shows upregulated and downregulated genes (disease can also influence the transcriptome to remove transcriptional factors, which can change chromatin accessibility and can dirsupt chromatin access homeostasis; disease can also downregulate genes)
+# accessibility controls gene regulation and can be visualized further on a motif/feature annotation plot
+# in the motif plot, you get sets of peaks that are absolutely distinct between cell ; you can pick either the upregulated or downregulated genes, based on your MA plot 
+# motif and feature enrichment graphs can show highly enriched motifs in certain cell types/treatment groups 
+
+# 5.1) Compute gene activity scores using chromatin accessibility
+getAvailableMatrices(proj_peakMatrix)  # here, you can see that matrix 'Gene score matrix' exists in the ArchR project
+
+# 5.2) Identify Marker Genes 
+# for our parameters, we applied a wilcoxan test method, with a bias for TSS enrichment and log10(nFrags)
+# we also used our gene score matrix and grouped by clusters
+# we then filter for a Log2FC of 1.0 and an FDR of 0.01 (p = 0.01)
+marker_genes <- getMarkerFeatures(
+  ArchRProj = proj_filtered,
+  useMatrix = "GeneScoreMatrix",
+  groupBy = "Clusters",
+  bias = c("TSSEnrichment", "log10(nFrags)"),
+  testMethod = "wilcoxon"
+)
+
+marker_genes # view marker gene summary here
+saveRDS(marker_genes, file = "marker_genes.rds") #save
+
+markers <- getMarkers(marker_genes, cutOff = "FDR <= 0.01 & Log2FC >= 1.0") # for each cluster, containins the relevant marker features, we get a list of DataFrame objects
+
+goi <- c("TOP2A", 
+         "MKI67", 
+         "AURKA",
+         "SATB2", 
+         "SLC12A7") # genes of interest
+
+UMAPgoi <- plotEmbedding( # before MAGIC
+  ArchRProj = proj_filtered, 
+  colorBy = "GeneScoreMatrix", 
+  name = goi, 
+  embedding = "UMAP",
+  quantCut = c(0.01, 0.95),
+  imputeWeights = NULL
+)
+
+for (i in seq_along(goi)) { # plots iteratively across all genes in goi
+  ggsave(
+    filename = paste0("UMAPgoi_", goi[i], ".pdf"), 
+    plot = UMAPgoi[[i]], 
+    width = 5, 
+    height = 5
+  )
+}
+
+# Add MAGIC!
+
+proj_filtered <- addImputeWeights(proj_filtered)
+
+
+UMAPgoiMagic <- plotEmbedding( # after MAGIC
+  ArchRProj = proj_filtered, 
+  colorBy = "GeneScoreMatrix", 
+  name = goi, 
+  embedding = "UMAP",
+  quantCut = c(0.01, 0.95),
+  imputeWeights = getImputeWeights(proj_filtered)
+)
+
+for (i in seq_along(goi)) { # plots iteratively across all genes in goi
+  ggsave(
+    filename = paste0("UMAPgoiMagic_", goi[i], ".pdf"), 
+    plot = UMAPgoiMagic[[i]], 
+    width = 5, 
+    height = 5
+  )
+}
+
+# Task 6
+
+# 6.1) TF Motif Annotation 
+# we used cisbp, the Catalog of Inferred Sequence Binding Preferences
+proj_peakMatrix <- addMotifAnnotations(ArchRProj = proj_peakMatrix, motifSet = "cisbp", name = "Motif")
+
+
+saveArchRProject(ArchRProj = proj_peakMatrix, 
+                 outputDirectory = "proj_peakMatrix", 
+                 load = FALSE,
+                 overwrite = TRUE
+)
+
+motifSet <- peakAnnoEnrichment(
+  seMarker = marker_peaks,
+  ArchRProj = proj_peakMatrix,
+  peakAnnotation = "Motif",
+  cutOff = "FDR <= 0.1 & Log2FC >= 0.5"
+)
+
+motifSet # output: summarizedExperiment
+
+# Now, convert this into a dataframe like so, in order to plot with ggplot:
+
+df <- data.frame(TF = rownames(motifSet), mlog10Padj = assay(motifSet)[,1])
+df <- df[order(df$mlog10Padj, decreasing = TRUE),]
+df$rank <- seq_len(nrow(df))
+
+head(df)
+
+ggUp <- ggplot(df, aes(rank, mlog10Padj, color = mlog10Padj)) + 
+  geom_point(size = 1) +
+  ggrepel::geom_label_repel(
+    data = df[rev(seq_len(30)), ], aes(x = rank, y = mlog10Padj, label = TF), 
+    size = 1.5,
+    nudge_x = 2,
+    color = "black"
+  ) + theme_ArchR() + 
+  ylab("-log10(P-adj) Motif Enrichment") + 
+  xlab("Rank Sorted TFs Enriched") +
+  scale_color_gradientn(colors = paletteContinuous(set = "comet"))
+
+ggUp
+
+# Task 7: from here, we operate our code in a new environment with an updated ArchR development installed
+# 7.1) Gene Integration
+seRNA <- readRDS("new_pbmc.rds") # load the rds file 
+class(seRNA)
+
+gc() # garbage collection
+
+proj_filtered <- addGeneIntegrationMatrix(
+  ArchRProj = proj_filtered, 
+  useMatrix = "GeneScoreMatrix",
+  matrixName = "GeneIntegrationMatrix",
+  reducedDims = "IterativeLSI",
+  seRNA = seRNA,
+  addToArrow = FALSE,
+  groupRNA = "Cluster.Name",
+  nameCell = "predictedCell_Un",
+  nameGroup = "predictedGroup_Un",
+  nameScore = "predictedScore_Un"
+)
+# constrained integration
+
+cM <- as.matrix(confusionMatrix(proj_filtered$LouvainClusters, proj_filtered$predictedGroup_Un))
+preClust <- colnames(cM)[apply(cM, 1 , which.max)]
+cbind(preClust, rownames(cM)) #Assignments
+
+unique(unique(proj_filtered$predictedGroup_Un)) # shows cell type labels from our our scRNA-seq data from unconstrained integration
+
+
+
+
+# Footprinting: transcription factors (TF) can either bind to a region, or not, based on how it regulates the transcriptome
+# All TFs leave behind a 'footprint' based on where they have been 
+# Tn5 cuts the regions where there is open chromatin, which can allow us to take this 'footprinting' data to see the footprint base
+# Tn5 do have a GC content bias
+# to remove this GC bias, there is an operation we can do: creatinga  hexamer position freequency table and a Tn5 Kmer frequency, which can be multiplied to create a Tn5 insertion bias 
+# in the Tn5 bias plot, you may dividie by normalized insertions to see the distance-to-motif center (bp) plot; thee accessibility can change from cell type to cells type or treatment groups 
+# in more differentiated cells, accessibility around certain transcription factors drastically increases 
